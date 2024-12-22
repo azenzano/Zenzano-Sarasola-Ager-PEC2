@@ -1,0 +1,1783 @@
+---
+title: 'ANÁLISIS DE DATOS ÓMICOS'
+subtitle: 'PEC2'
+author: "Ager Zenzano Sarasola - UOC"
+date: '`r format(Sys.Date())`'
+output:
+  bookdown::pdf_document2:
+    citation_package: biblatex
+    keep_tex: yes #se puede poner yes
+    #number_sections: yes
+    toc: False #list of content
+    toc_depth: 3
+    fig_caption: yes
+    fig_height: 5.0
+    fig_width: 8.0
+    #biblio-style: "apalike"
+bibliography: bibliography.bib
+link-citations: yes
+figurelist: yes
+header-includes:
+- \usepackage{mathrsfs}       # To include mathsrc fonts
+- \usepackage{float}          # To insert figures caption
+- \floatplacement{figure}{H}  # To insert figures caption
+- \floatplacement{table}{H}
+- \usepackage{xcolor}
+- \usepackage{framed}
+- \usepackage{fancyhdr}
+- \pagestyle{fancy}
+- \fancyhf{}
+- \fancyhead[CE,CO]{\leftmark}
+- \fancyfoot[LE,RO]{\thepage}
+- \usepackage[ruled,vlined,linesnumbered]{algorithm2e}
+- \usepackage{amsmath} 
+- \usepackage[format=plain,labelfont={bf,it},labelfont={color=blue},textfont=it]{caption}
+- \usepackage[backend=biber, style=alphabetic, citestyle=authortitle]{biblatex}
+- \usepackage{sectsty}
+- \sectionfont{\clearpage}
+- \usepackage{sectsty} # a pagebreak for every top level heading
+- \sectionfont{\clearpage} #a pagebreak for every top level heading
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning=FALSE, message = FALSE,comment = NA, number_sections = FALSE)
+```
+
+
+\newpage
+\tableofcontents
+\newpage
+\listoffigures
+\newpage
+\listoftables
+\newpage
+
+# Introducción y Objetivos
+
+## Introducción
+
+En esta PEC procederemos a la realización de un análisis de datos, que nos permitirán mejorar nuestra comprensión de un problema biológico mediante métodos, herramientas estadísticas y bioinformáticas. Haremos uso de métodos y herramientas para la selección de genes y el análisis de la significación biológica. Mostraremos los resultados obtenidos en cada fase del análisis y finalmente presentaremos una breve discusión sobre las posibles limitaciones encontradas.
+
+La PEC se basará en los datos de un estudio que, utilizando un modelo `murino` (de ratón) investigaremos la utilidad de los antibióticos `LINEZOLID` y `VANCOMICINA` para inmunomodulación durante infecciones por `Staphylococcus aureus` resistente a `meticilina` (MRSA).
+
+## Estructura del documento
+
+La construcción del presente informe lo hemos realizado mediante `R`, utilizando Rmarkdown para generar mediante código `R` embebido y `LateX` un documento `PDF`.
+
+En cuanto al contenido, el informe tendrá la siguiente estructura: Tabla de contenidos, Introducción y Objetivos, Métodos, Resumen de resultados, Discusión, Referencias, y Apéndices. Para ello nos basaremos en el propio enunciado de la `PEC` y en los diferentes ejemplos y ejercicios realizados en la asignatura:  [@GonzaloSanz2020] [@Mireia2021] [@Sanchez20b] [@Sanchez23] .
+
+## Objetivos
+
+Nuestro objetivo será intentar caracterizar, a través del cambio en la expresión génica, el efecto de la infección y del tratamiento con antibióticos así como comparar los efectos de éstos. 
+
+Por ello, mediante este trabajo realizaremos un estudio de datos de microarrays y haremos las comparaciones siguientes:
+
+* Infectados vs no infectados sin tratamiento.
+* Infectados vs no infectados tratados con `LINEZOLID`.
+* Infectados vs no infectados tratados con `VANCOMICINA`.
+
+Esto generará tres listas de genes que deberemos, por un lado caracterizar mediante análisis de significación biológica y, por otro lado, comparar entre ellas.
+
+# Métodos
+
+## Contexto
+
+Las metodología que utilizaremos en el análisis, así como las técnicas y herramientas seguirán las pautas descritas en los materiales de diferentes ejemplos sobre el análisis de microarrays vistos en la asignatura.
+
+Tanto el análisis estadístico como la manipulación de los datos lo haremos mediante el lenguaje de programación `R`. Además, haremos uso de la librerías del framework de `Bioconductor` (https://www.bioconductor.org) para el análisis de microarrays.
+
+Los valores "crudos" de expresión los obtendremos directamente de los archivos `.CEL`, como veremos en un apartado posterior. Después pre-procesaremos los datos utilizando el método de `RMA` [@Irizarry2003]. Una vez terminado el pre-procesado obtendremos los genes diferencialmente expresados y terminaremos con el post-procesado con el que realizaremos anotaciones sobre los genes, visualizaremos los perfiles de expresión y realizaremos el análisis de la significación biológica.
+
+## Preparación del entorno
+
+### Paquetes a instalar
+
+Para ejecutar el código `R` del presente documento necesitaremos que estén instalados y cargadas en memoria una serie de paquetes `R` y otros específicos de `Bioconductor`, junto con las correspondientes dependencias que estos paquetes puedan tener.
+
+Para gestionar adecuadamente los paquetes de `Bioconductor` necesitaremos tener instalado el paquete `BiocManager` tal y como se especifica a continuación.
+
+```{r, eval=FALSE}
+if (!requireNamespace("BiocManager", quietly = TRUE))
+  install.packages("BiocManager")
+BiocManager::install()
+```
+
+```{r, eval=FALSE}
+install.packages("dplyr")
+install.packages("tidyr")
+install.packages("tidyr")
+install.packages("ggplot2")
+install.packages("kableExtra")
+install.packages("gplots")
+install.packages("ggrepel")
+
+BiocManager::install("oligo")
+BiocManager::install("Biobase")
+BiocManager::install("arrayQualityMetrics")
+BiocManager::install("pvca")
+BiocManager::install("affyio")
+BiocManager::install("genefilter")
+BiocManager::install("mouse4302.db")
+BiocManager::install("limma")
+BiocManager::install("annaffy")
+BiocManager::install("clusterProfiler")
+```
+
+
+```{r, echo=FALSE}
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(kableExtra)
+library(gplots)
+library(ggrepel)
+
+library(oligo)
+library(Biobase)
+library(arrayQualityMetrics)
+library(pvca)
+library(affyio)
+library(genefilter)
+library(mouse4302.db)
+library(limma)
+library(annaffy)
+library(clusterProfiler)
+
+```
+
+## Preparación de los datos
+
+### Obtención de los datos
+
+Para realizar el análisis de datos con microarrays, partiremos de un proyecto en `R` y dentro del mismo, crearemos un estructura de carpetas donde iremos guardando y mantendremos organizados todos los datos que iremos utilizando. Por ello, partiremos de un directorio raíz de trabajo, el cual lo denominaremos como directorio de trabajo (`As Working Directory`). A partir este directorio colgará toda la subestructura de carpetas y se localizarán los diferentes ficheros. Este directorio raíz lo asignaremos a la variable `workingDire` y de éste se encontrarán los subdirectorios:
+  
+* `downloads`, donde almacenaremos el fichero original descargado de en formato comprimido.
+* `results`, donde almacenaremos los distintos resultados que iremos obteniendo durante el análisis.
+* `celfiles`, donde almacenaremos los ficheros `.CEL` ya descomprimidos y el fichero `target.txt` con la información de las covariantes.
+
+```{r}
+workingDire <-getwd()
+downloadsDire <-file.path(workingDire, "downloads/")
+resultsDire <- file.path(workingDire,"results/")
+celfilesDire <- file.path(workingDire,"celfiles")
+```
+
+```{r}
+list.dirs(path = workingDire, full.names = FALSE, recursive = FALSE)
+```
+
+Los datos crudos para el análisis los descargaremos del sitio de GEO https://www.ncbi.nlm.nih.gov/geo/query/a cc.cgi?acc=GSE38531 donde también encontraremos información sobre el estudio original. 
+
+```{r}
+list.files(downloadsDire)
+```
+
+Después de descargar el fichero comprimido procederemos a descomprimirlo y almacenar los ficheros `.CEL` en `celfilesDire`. 
+
+```{r, echo=FALSE}
+file_path <- paste0(downloadsDire,"GSE38531_RAW.tar")
+if (!file.exists(file_path)) {
+  print("The file does not exist, therefore it will be downloaded")
+  url <- "https://www.ncbi.nlm.nih.gov/geo/download/?acc=GSE38531&format=file"
+  utils::download.file(url, destfile=file_path, mode="wb") 
+}
+```
+
+
+```{r}
+list.files(celfilesDire)
+```
+
+Observamos que al descomprimir los ficheros, los nombres de éstos no coinciden exactamente con los nombres proporcionados en `targets`, por lo que realizaremos pequeños ajustes para que estos coincidan.
+
+```{r, echo=FALSE}
+check_files = list.files(celfilesDire)
+if (length(check_files) == 0){
+  utils::untar(file_path, exdir = celfilesDire)
+  files <-paste("celfiles",  dir("celfiles",pattern = "*.gz"), sep="/")
+  for(filename in files){
+    R.utils::gunzip(filename, 
+                    destname = paste0(gsub("[_].*","\\2",filename),".CEL"), 
+                    overwrite=FALSE)
+  }
+}
+```
+
+### Selección de muestras para el análisis
+
+Siguiendo el enunciado y con el fin de simplificar el análisis y particularizar en cierta medida el estudio eliminaremos algunas muestras: por un lado prescindiremos de las cinco muestras tomadas a las dos horas, y por otro lado seleccionaremos de manera aleatoria las muestras restantes de manera conservaremos únicamente cuatro muestras de cada grupo respecto a los datos de partida.
+
+Para realizar dicha selección utilizaremos la función `filter_microarray()` de `R` que encontraremos en el fichero `selectSamples.R` que descargaremos de la plataforma de la UOC junto con el propio enunciado para realizar la PEC.
+Dicha función nos permitirá extraer 24 muestras distintas a cada uno con tan solo llamarla usando como semilla (argumento “seed”) IDP (por responsabilidad en la confidencialidad de datos tan solo utilizaremos los últimos 4 dígitos).
+
+En el fichero `selectSamples.R` encontraremos además, la estructura de datos `allTargets` donde estará almacenada la información de las covariantes.
+
+Aplicaremos la función `filter_microarray()` sobre `allTargets` y obtendremos un nuevo objeto `targets` que nos permitirá crear un nuevo `ExpressionSet` leyendo únicamente aquellos archivos `.CEL` que hayamos seleccionado. A partir de este `ExpressionSet` personalizado, con 24 muestras muestras procederemos a realizar nuestro análisis.
+
+```{r, echo=FALSE}
+allTargets <- data.frame(
+  sample = c("GSM944831", "GSM944838", "GSM944845", "GSM944852", "GSM944859",
+             "GSM944833", "GSM944840", "GSM944847", "GSM944854", "GSM944861",
+             "GSM944834", "GSM944841", "GSM944848", "GSM944855", "GSM944862",
+             "GSM944832", "GSM944839", "GSM944846", "GSM944853", "GSM944860",
+             "GSM944835", "GSM944842", "GSM944849", "GSM944856", "GSM944863",
+             "GSM944836", "GSM944843", "GSM944850", "GSM944857", "GSM944864",
+             "GSM944837", "GSM944844", "GSM944851", "GSM944858", "GSM944865"),
+  infection = c(rep("uninfected", 15), rep("S. aureus USA300", 20)),
+  time = c(rep("hour 0", 15), rep("hour 2", 5), rep("hour 24", 15)),
+  agent = c(rep("untreated", 5), rep("linezolid", 5), rep("vancomycin", 5),
+            rep("untreated", 5), rep("untreated", 5), rep("linezolid", 5), rep("vancomycin", 5)),
+  groupo = c(rep("uni_unt", 5), rep("uni_lin", 5), rep("uni_van", 5),
+             rep("inf_unt", 5), rep("inf_unt", 5), rep("inf_lin", 5), rep("inf_van", 5))
+)
+```
+
+
+```{r, echo=FALSE}
+filter_microarray <- function(allTargets, seed) {
+  # Esta función permitirá extraer 24 muestras distintas a cada uno con tan solo 
+  # llamarla usando como
+  
+  # Configurar la semilla aleatoria
+  set.seed(seed)
+  
+  # Filtrar las filas donde 'time' no sea 'hour 2'
+  filtered <- subset(allTargets, time != "hour 2")
+  
+  # Dividir el dataset por grupos únicos de 'infection' + 'agent'
+  filtered$group <- interaction(filtered$infection, filtered$agent)
+  
+  # Seleccionar 4 muestras al azar de cada grupo
+  selected <- do.call(rbind, lapply(split(filtered, filtered$group), function(group_data) {
+    if (nrow(group_data) > 4) {
+      group_data[sample(1:nrow(group_data), 4), ]
+    } else {
+      group_data
+    }
+  }))
+  
+  # Obtener los índices originales como nombres de las filas seleccionadas
+  original_indices <- match(selected$sample, allTargets$sample)
+  
+  # Modificar los rownames usando 'sample' y los índices originales
+  rownames(selected) <- paste0(selected$sample, ".", original_indices)
+  
+  # Eliminar la columna 'group' y devolver el resultado
+  selected$group <- NULL
+  return(selected)
+}
+```
+
+
+```{r, echo=FALSE}
+result <- filter_microarray(allTargets, seed=1935) %>%
+  mutate(sample_id = sample) %>%
+  mutate(short_name = paste0(sample,"_",groupo)) %>%
+  mutate(sample=paste0(sample,".CEL"))
+
+write.table(result,  file = "./celfiles/targets.txt", sep="\t", row.names=FALSE, quote=FALSE)
+```
+
+```{r}
+list.files(celfilesDire, pattern = ".txt")
+```
+
+```{r, echo=FALSE}
+kable(data.frame(result), row.names = F, booktabs = T, caption = "targets.txt.")
+```
+
+### Lectura de los datos
+
+El paso inicial que haremos con los datos, partiendo del subconjunto de 24 ficheros (`targets.txt`), será utilizar la librería `oligo` de `R` para leer los datos en bruto (archivos `CEL`) y almacenarlos en la variable `rawData`. Esta variable será un objeto `ExpressionSet` que está diseñado para almacenar y organizar varias fuentes de información diferentes en un único conjunto de datos [@GonzaloSanz2020].
+
+```{r, echo=FALSE}
+sampleInfo <- read.AnnotatedDataFrame(file.path(celfilesDire,"targets.txt"), 
+                                      header = TRUE, row.names = 1, sep="\t")
+
+fileNames <- rownames(pData(sampleInfo))
+celFiles <- file.path(celfilesDire,fileNames)
+rawData <- read.celfiles(celFiles, phenoData = sampleInfo, verbose = FALSE)
+```
+
+A continuación, mostramos las muestras leídas (ficheros `CEL` leídos) y almacenados en el objeto `rawData`.
+
+```{r}
+rownames(pData(rawData)) 
+```
+
+```{r}
+head(rawData)
+```
+
+
+## Análisis exploratorio y control de calidad
+
+### Exploración de datos
+
+Empezaremos con una exploración de datos procedentes de la lectura de los microarrays (crudos) realizada en el apartado anterior. Esta primera lectura, nos permitirá decidir si los datos necesitan alguna transformación, si presentan algún problema y si los grupos que deseamos comparar se separan mínimamente. 
+
+Para disponer de cierta descripción sobre las muestras que visualizaremos, añadimos al nombre del fichero la información de las covariantes a través del campo `short_name` a partir de `targets.txt`.
+
+```{r, echo=FALSE}
+pData(rawData)$short_name->rownames(pData(rawData))
+colnames(rawData) <-rownames(pData(rawData)) 
+rownames(pData(rawData)) 
+```
+
+```{r, echo=FALSE}
+colores <- c(rep("yellow", 4), rep("blue", 4))
+grupos <- pData(rawData)$infection
+numSamples <- nrow(pData(rawData))
+sampleNames <- rownames(pData(rawData))
+```
+
+A continuación, realizaremos una primera exploración de los datos de manera visual mediante técnicas univariantes como son gráfico de densidad, diagrama de cajas.
+
+```{r plotHistRaw, echo=FALSE, message=FALSE, fig.cap="Diagrama para visualizar la distribución de las expresiones de cada array para los datos crudos.", fig.width=8, fig.height=4.5}
+
+hist(rawData, main="Signal distribution", , col = c("blue", "red"), lty=1:numSamples)
+legend (x="topright", legend=sampleNames , col = c("blue", "red"), lty=1:numSamples)
+```
+
+
+```{r plotBoxRaw, echo=FALSE, message=FALSE, fig.cap="Diagrama de cajas para los datos crudos de las expresiones de cada array.", fig.width=8, fig.height=4.5}
+
+boxplot(rawData,main="Distribution of raw intensity values", 
+        names=sampleNames, col = c(rep("red", 4), rep("blue", 4)), cex.axis=0.7,las=2)
+```
+
+También utilizaremos técnicas multivariantes como son el análisis de conglomerados, `cluster` mediante un agrupamiento jerárquico seguido de un dendrograma, y realizaremos un análisis de distancias visualizando después la matriz de distancias mediante un mapa de calores [@Sanchez20b].
+
+```{r}
+manDist <-dist(t(exprs(rawData))) 
+```
+
+
+```{r ploHeat, echo=FALSE, message=FALSE, fig.cap="Diagrama de calor de las distancias euclídeas entre los distintos arrays a partir de los datos crudos.", fig.width=6, fig.height=6}
+
+heatmap (as.matrix(manDist),  col=heat.colors(16))  
+```
+
+```{r plotDendro, echo=FALSE, message=FALSE, fig.cap="Dendrograma resultante de un agrupamiento jerárquico entre las muestras a partir de los datos crudos."}
+
+clust.euclid.average <- hclust(dist(t(exprs(rawData))),method="average")
+plot(clust.euclid.average, labels=sampleNames, main="Hierarchical clustering of samples",  hang=-1)
+```
+
+Para evaluar y detectar posibles efectos de lote, `batch`, realizaremos un análisis de los componentes principales PCA y mostraremos en un gráfico los componentes principales mostrando los datos en dimensión reducida de forma que cada componente explicará una dimensión de mayor variabilidad e independiente de la siguiente [@Sanchez20b].
+
+La importancia de los grupos los representaremos a través de variabilidad explicada por cada componente. Según [@Sanchez20b], si la suma de los porcentajes es alta, superior por ejemplo al 50%, las conclusiones que de ellos se deriven serán más fiables que con valores bajos, por ejemplo inferiores al 30% de varianza explicada.
+
+```{r, echo=FALSE}
+plotPCA3 <- function (datos, labels, factor, title, scale,colores, size = 1.5, glineas = 0.25) {
+  data <- prcomp(t(datos),scale=scale)
+  # plot adjustments
+  dataDf <- data.frame(data$x)
+  Group <- factor
+  loads <- round(data$sdev^2/sum(data$sdev^2)*100,1)
+  # main plot
+  p1 <- ggplot(dataDf,aes(x=PC1, y=PC2)) +
+    theme_classic() +
+    geom_hline(yintercept = 0, color = "gray70") +
+    geom_vline(xintercept = 0, color = "gray70") +
+    geom_point(aes(color = Group), alpha = 0.55, size = 3) +
+    coord_cartesian(xlim = c(min(data$x[,1])-5,max(data$x[,1])+5)) +
+    scale_fill_discrete(name = "Group")
+  # avoiding labels superposition
+  p1 + geom_text_repel(aes(y = PC2 + 0.25, label = labels),segment.size = 0.25, size = size) + 
+    labs(x = c(paste("PC1",loads[1],"%")),y=c(paste("PC2",loads[2],"%"))) +  
+    ggtitle(paste("Principal Component Analysis for: ",title,sep=" "))+ 
+    theme(plot.title = element_text(hjust = 0.5)) +
+    scale_color_manual(values=colores)
+}
+```
+
+```{r plotPCARaw, echo=FALSE, message=FALSE, fig.cap="Diagrama para visualizar los dos primeros componentes de los datos crudos."}
+plotPCA3(exprs(rawData), labels = result$short_name, factor = result$infection, 
+         title="Raw data", scale = FALSE, size = 3, 
+         colores = c("red", "blue", "green", "yellow"))
+```
+
+### Control de calidad de los datos crudos
+
+A continuación, realizaremos, un control de calidad con el método `arrayQualityMetrics()` del paquete `arrayQualityMetrics` específico para microarrays, que encapsula diferentes análisis generando un subdirectorio en el que guarda todas las salidas. Estas salidas están englobadas en un archivo `index.html`.
+
+
+```{r, echo=FALSE}
+if(!dir.exists(file.path(resultsDire, "arrayQuality_raw"))){
+  arrayQualityMetrics(rawData,outdir=file.path(resultsDire, "arrayQuality_raw"),force=TRUE)
+}
+```
+
+```{r}
+list.files(paste0(resultsDire,"arrayQuality_raw/"))
+```
+
+A continuación, mostramos los valores (outliers) identificado con los diferentes métodos utilizados por la función `arrayQualityMetrics()`:
+  
+```{r arrQoutbox, fig.cap="Diagrama obtenido de `arrayQualityMetrics()` para detectar outliers (Distancias entre arrays) a partir de los datos crudos.", echo=FALSE}
+
+knitr::include_graphics(paste0(resultsDire,"arrayQuality_raw/out box.png"))
+```
+
+```{r arrQouthm, fig.cap="Diagrama obtenido de `arrayQualityMetrics()` para detectar outliers (Diagrama de cajas) a partir de los datos crudos.", echo=FALSE}
+
+knitr::include_graphics(paste0(resultsDire,"arrayQuality_raw/out hm.png"))
+```
+
+```{r arrQoutma, fig.cap="Diagrama obtenido de `arrayQualityMetrics()` para detectar outliers (Diagrma MA) a partir de los datos crudos.", echo=FALSE}
+
+knitr::include_graphics(paste0(resultsDire,"arrayQuality_raw/out ma.png"))
+```
+
+### Normalización
+
+Tras una primera exploración y control de calidad, el siguiente paso que haremos será normalizar los datos. Los datos se pueden normalizar mediante diferente herramientas, no obstante, en el presente estudio utilizaremos el método `rma()`.
+
+Este paso es necesario para que cuando hagamos el análisis de los genes diferencialmente expresados, estos sean comparables entre sí e intentar reducir, y si es posible eliminar, toda la variabilidad en las muestras que no se deba a razones biológicas [@GonzaloSanz2020b].
+
+Es decir, mediante el proceso de normalización lo que queremos es eliminar sesgos artificiales debidos a cuestiones técnicas [@GonzaloSanz2020b]. De esta manera aseguraremos que en la matriz se refleja la expresión diferencial de los genes [@GonzaloSanz2020b].
+
+Cabe destacar que el proceso de normalización mediante RMA se compone de tres etapas [@GonzaloSanz2020b]:
+  
+* Corrección de fondo
+* Normalización para hacer los valores de los arrays comparables.
+* Summarización de las diversas sondas asociadas a cada grupo de sondas para dar un único valor.
+
+
+```{r, echo=TRUE, eval=FALSE}
+eset_rma <- rma(rawData)
+```
+
+
+```{r, echo=FALSE, eval=TRUE}
+eset_rma <- rma(rawData)
+```
+
+
+```{r plotHistNorm, echo=FALSE, message=FALSE, fig.cap="Diagrama para visualizar la distribución de las expresiones de cada array para los datos normalizado", fig.width=8, fig.height=4.5}
+
+hist(eset_rma, main="Signal distribution", , col = c("blue", "red"), lty=1:numSamples)
+legend (x="topright", legend=sampleNames , col = c("blue", "red"), lty=1:numSamples)
+```
+
+A continuación, visualizaremos en un diagrama de cajas con los datos normalizados,
+
+```{r, plotBoxNorm, echo=FALSE, message=FALSE, fig.cap="Diagrama de cajas los datos normalizados.", fig.width=8, fig.height=4.5}
+
+boxplot(eset_rma, cex.axis=0.5, las=2,  which="all", 
+        col = c(rep("red", 4), rep("blue", 4)),
+        main="Diagrama de cajas con los datos normalizados.")
+```
+
+Ahora observamos que todos los diagramas de caja tienen el mismo aspecto, están en una escala común en la que se pueden comparar. Por tanto, podemos decir que la normalización ha funcionado correctamente. 
+
+### Control de calidad de los datos normalizados
+
+Después de normalizar los datos es interesante volver a realizar un control de calidad de los datos para comprobar cómo se ven los datos [@GonzaloSanz2020b].
+
+```{r, echo=FALSE}
+if(!dir.exists(file.path(resultsDire, "arrayQuality_norm"))){
+  arrayQualityMetrics(eset_rma,outdir=file.path(resultsDire, "arrayQuality_norm"),force=TRUE)
+}
+```
+
+```{r}
+list.files(paste0(resultsDire,"arrayQuality_raw/"))
+```
+
+A continuación, mostramos los valores (outliers) identificado con los diferentes métodos utilizados por la función
+`arrayQualityMetrics()` después de normalizar los datos con la función `rma()`:
+  
+```{r, echo=FALSE, arrQoutboxNorm, fig.cap="Diagrama obtenido de `arrayQualityMetrics()` para detectar outliers (Distancias entre arrays) a partir de los datos normalizados.", echo=FALSE}
+
+knitr::include_graphics(paste0(resultsDire,"arrayQuality_norm/out box.png"))
+```
+
+```{r, echo=FALSE, arrQouthmNorm, fig.cap="Diagrama obtenido de `arrayQualityMetrics()` para detectar outliers (Diagrama de cajas) a partir de los datos normalizados.", echo=FALSE}
+
+knitr::include_graphics(paste0(resultsDire,"arrayQuality_norm/out hm.png"))
+```
+
+```{r, echo=FALSE, arrQoutmaNorm, fig.cap="Diagrama obtenido de `arrayQualityMetrics()` para detectar outliers (Diagrama MA) a partir de los datos normalizados.", echo=FALSE}
+
+knitr::include_graphics(paste0(resultsDire,"arrayQuality_norm/out ma.png"))
+```
+
+
+```{r, echo=FALSE, plotPCANorm, echo=FALSE, message=FALSE, fig.cap="Diagrama para visualizar los dos primeros componentes  de los datos normalizados."}
+
+plotPCA3(exprs(eset_rma), labels = result$short_name, factor = result$infection, 
+         title="Raw data", scale = FALSE, size = 3, 
+         colores = c("red", "blue", "green", "yellow"))
+```
+
+### Detección del efecto lote
+
+Para analizar el efecto lote utilizamos la función `pvcaBatchAssess` del paquete `pvca`.
+
+Según [@GonzaloSanz2020] el error acumulativo introducido por variaciones experimentales por causas técnicas (herramienta, técnico, ...) dependientes del tiempo y el lugar se conoce como "efectos de lote".
+
+En el ámbito de los datos de microarrays, existen diferentes enfoques para identificar la existencia o no de este tipo de efecto. En el presente análisis, siguiendo los ejemplos visto [@GonzaloSanz2020], utilizaremos el `PVCA (`Combat and Principal variation component analysis`).
+Esta herramienta, estima la fuente y la proporción de variación en dos pasos, análisis de componentes principales y análisis de componentes de varianza. 
+
+Comprobaremos también si todas las muestras se procesaron el mismo día mediante la función `get.celfile.dates()` del paquete `affyio`,
+
+```{r}
+unique(get.celfile.dates(filenames=file.path(celfilesDire,fileNames)))
+```
+
+vemos que no es necesario considerar un factor de lote típico como la "Fecha de procesamiento".
+
+```{r, echo=FALSE}
+pData(eset_rma) <- result
+
+pct_threshold <- 0.6
+batch.factors <- c("time","agent")
+pvcaObj <- pvcaBatchAssess (eset_rma, batch.factors, pct_threshold)
+```
+
+En la siguiente visualización se muestra un diagrama de barras con una barra por cada fuente de variación incluida en el análisis. El tamaño de cada barra indica el porcentaje de variabilidad atribuible a cada fuente [@Sanchez20b]. En nuestro caso, el gráfico indica que la principal fuente de variación en las muestras es la condición de `tiempo`. Esto se observó también de manera clara en los gráficos de PCA; tanto en los datos brutos, como en los normalizados.
+
+```{r plotPVCA, echo=FALSE, fig.cap="Diagrama de barras que indica la importancia relativa de los diferentes factores que afectan a la expresión del gen: `agent`, `time`, `resid`, `interacción time:agent.`", fig.width=6, fig.height=4.0}
+bp <- barplot(pvcaObj$dat, xlab = "Effects",
+              ylab = "Proporción varianza ponderada.",
+              ylim= c(0,1.1),col = c("mediumorchid"), las=2,
+              main="Estimation PVCA")
+axis(1, at = bp, labels = pvcaObj$label, cex.axis = 0.75, las=2)
+values = pvcaObj$dat
+new_values = round(values , 3)
+text(bp,pvcaObj$dat,labels = new_values, pos=3, cex = 0.7)
+```
+
+### Filtrado de los datos
+
+Según [@Sanchez20b] el filtraje es algo discutido, no obstante en el enunciado de la PEC se sugiere la posibilidad de eliminar las sondas menos variables y quedarnos con el 10% de sondas que presenten mayor variabilidad.
+
+A continuación, detectaremos los genes con mayor variabilidad. Para ello, nos fijaremos en la variabilidad global de cada gen.
+
+```{r}
+sds <- apply(exprs(eset_rma), 1, sd)
+sdsO <- sort(sds)
+```
+
+
+En la siguiente visualización veremos la variabilidad de todos los genes, y esperamos diferenciar los genes que varían más de los que no lo hacen. Se mostrarán los valores de desviación estándar para todas las muestras para todos los genes, ordenados de menor a mayor.
+
+```{r plotDistVarGen, echo=FALSE, fig.cap="Diagrama que muestra los valores desviaciones estándar a lo largo de todas las muestras para todos los genes ordenados de menor a mayor.", fig.width=6, fig.height=4.0}
+
+plot(1:length(sdsO), sdsO, main="Distribution of variability for all genes",
+     sub="Vertical lines represent 90% and 95% percentiles",
+     xlab="Gene index (from least to most variable)", ylab="Standard deviation")
+abline(v=length(sdsO)*c(0.9,0.95))
+```
+
+Para realizar el filtrado de aquellos genes con menor variabilidad, aquellos genes cuya variabilidad puede atribuirse a una variación aleatoria, utilizaremos la función `nsFilter()` de la librería `genefilter` [@GonzaloSanz2020]. Razonablemente, se espera que estos genes no se expresen de forma diferencial [@GonzaloSanz2020].
+
+Antes de realizar el filtrado asociaremos sobre al `ExpressionSet` una serie de anotaciones mediante el conjunto de datos `mouse4302.db`.
+
+```{r}
+annotation(eset_rma) <- "mouse4302.db"
+```
+
+Este paquete de anotaciones disponible lo utilizaremos para eliminar aquellos conjuntos de sondas que no tengan un identificador de gen asociado. Además de este criterio de filtrado utilizaremos el parámetro `var.cutoff` de la función `nsFilter()` para establecer un umbral de variabilidad.
+
+```{r}
+data_nsFilter <- nsFilter(eset_rma, 
+                          require.entrez=TRUE,
+                          remove.dupEntrez=TRUE, 
+                          var.func=IQR,
+                          var.cutoff=0.9, 
+                          filterByQuantile=TRUE,
+                          var.filter=TRUE,
+                          feature.exclude="^AFFX"
+)
+```
+
+la función `nsFilter()` devuelve dos objetos: un `expressionSet` y otro de log:
+```{r, echo=FALSE}
+names(data_nsFilter)
+```
+
+con el objeto `filter.log` podemos ver el resultados del filtrado:
+  
+```{r, echo=FALSE}
+print(data_nsFilter$filter.log)
+```
+
+Almacenaremos los genes que sobreviven al filtrado en la variable `eset_rma_filt`.
+```{r}
+data_eset_rma_filt <- data_nsFilter$eset
+```
+
+Después de realizar el filtrado vemos la evolución en cuanto a la dimensión del conjunto de datos.
+```{r, echo=FALSE}
+df_data_sum <- data.frame(cbind("dataset"=c("rawData","eset_rma","data_eset_rma_filt"),
+                                rbind(dim(rawData),dim(eset_rma),dim(data_eset_rma_filt))))
+
+kable(data.frame(df_data_sum), row.names = F, booktabs = T, caption = "Conjuntos de datos.")
+```
+
+Guardamos los datos crudos, normalizados y los filtrados en `resultsDire`.
+```{r, echo=FALSE}
+write.csv(exprs(rawData), file="./results/data_raw.csv")
+write.csv(exprs(eset_rma), file="./results/data_normalized.csv")
+write.csv(exprs(data_eset_rma_filt), file="./results/data_normalized_filtered.csv")
+save(eset_rma, data_eset_rma_filt, file="./results/data_normalized.Rda")
+```
+
+```{r}
+list.files(paste0(resultsDire))
+```
+
+## Genes diferencialmente expresados para cada comparación
+
+Utilizaremos modelos lineales para microarrays para obtener una lista de genes diferencialmente expresados. El primer paso para el análisis basado en modelos lineales es crear la matriz de diseño [@Sanchez20b] y después crearemos la matriz de contrastes y utilizaremos ambas matriz para realizar las comparaciones propuestas en el enunciado:
+  
+* Infectados vs no infectados sin tratamiento
+* Infectados vs no infectados tratados con LINEZOLID
+* Infectados vs no infectados tratados con VANCOMICINA
+
+Es decir, nuestro objetivo será intentar caracterizar, a través del cambio en la expresión génica, el efecto de la infección y del tratamiento con antibióticos así como comparar los efectos de éstos.
+
+### Construcción de las matrices de diseño y de contrastes
+
+La matriz de diseño es una tabla que describe la asignación de cada muestra (filas) a un grupo (columnas). Cada fila contiene un uno en la columna del grupo al que pertenece la muestra y un cero en las restantes [@Sanchez20b].
+
+Definimos con la función `model.matrix()` la matriz de diseño para el análisis que estamos realizando de la siguiente manera:
+  
+```{r, echo=FALSE}
+designMat<- model.matrix(~0+groupo, pData(data_eset_rma_filt))
+colnames(designMat) <- c("inf_lin", "inf_unt", "inf_van", "uni_lin", "uni_unt", "uni_van")
+```
+
+```{r, echo=FALSE}
+kable(data.frame(designMat), row.names = F, booktabs = T, caption = "Matriz de diseño.")
+```
+
+
+Por otro lado, la matriz de contrastes describe las comparaciones entre grupos [@Sanchez20b]. Consta de tantas columnas como comparaciones y tantas filas como grupos. A partir del enunciado, mediante la función `makeContrasts()`, definiremos a continuación la matriz de contrastes:
+  
+```{r, echo=FALSE}
+cont.matrix <- makeContrasts (inf_vs_uni.unt = inf_unt-uni_unt,
+                              inf_vs_uni.lin = inf_lin-uni_lin,
+                              inf_vs_uni.van = inf_van-uni_van,
+                              levels=designMat)
+```
+
+```{r, echo=FALSE}
+kable(data.frame(cont.matrix), row.names = F, booktabs = T, caption = "Matriz de contrastes para las tres comparaciones.")
+```
+
+Mediante esta matriz de contrastes recogeremos lo siguiente:
+  
+* Infectados vs no infectados sin tratamiento: analizar el efecto del no tratamiento sobre los infectados y no infectados.
+* Infectados vs no infectados tratados con LINEZOLID: analizar el efecto del tratamiento `lin` sobre los infectados y no infectados.
+* Infectados vs no infectados tratados con VANCOMICINA: analizar el efecto del tratamiento `van` sobre los infectados y no infectados.
+
+### Estimación del modelo y selección de genes
+
+Como hemos mencionado al inicio de presente apartado, utilizaremos el paquete `limma` para obtener una lista de genes diferencialmente expresados. Para estimar el modelo lineal utilizaremos la función `lmFit()`. Tras ajustar el modelo estimaremos los contrastes y realizaremos las pruebas de significación que nos llevarán a decidir, para cada gen y cada comparación, si éstos pueden considerarse diferencialmente expresados [@GonzaloSanz2020].
+
+```{r}
+fit <- lmFit(data_eset_rma_filt, designMat)
+fit.main <- contrasts.fit(fit, cont.matrix)
+fit.main <- eBayes(fit.main)
+```
+
+### Obtención de las listas de genes diferencialmente expresados
+
+Los resultados de un análisis de expresión diferencial se pueden extraer con la función `topTable` [@Mireia2021]. Esta función para cada contraste obtiene una tabla de genes ordenados por el p-value de menor a mayor, donde las columnas contienen información acerca de los genes y la diferencia entre los grupos comparados [@Mireia2021].
+
+A continuación realizaremos el análisis de expresión diferencial para cada comparación que hemos definido.
+
+* inf_vs_uni.unt: genes que cambian su expresión entre `infeccion` y `no infeccion` `sin tratamiento`:
+```{r, echo=FALSE}
+topTab_inf_vs_uni.unt <- (topTable(fit.main, number=nrow(fit.main), coef="inf_vs_uni.unt", adjust="fdr") )
+```
+
+En la siguiente tabla mostramos los 10 genes más expresados diferencialmente en cada comparación `inf_vs_uni.unt`.
+```{r, tabTopGen1, echo=FALSE}
+df_topTab_inf_vs_uni.unt <- data.frame(head(topTab_inf_vs_uni.unt,10))
+df_topTab_inf_vs_uni.unt <- cbind(PROBEID=rownames(df_topTab_inf_vs_uni.unt), df_topTab_inf_vs_uni.unt)
+kable(df_topTab_inf_vs_uni.unt, row.names = F, booktabs = T, caption = "Resultado `topTable()` para inf vs uni unt: genes que cambian su expresión entre `infeccion` y `no infeccion` `sin tratamiento`.")
+```
+
+* inf_vs_uni.lin: genes que cambian su expresión entre `infeccion` y `no infeccion` con `tratamiento` `lin`.
+```{r, echo=FALSE}
+topTab_inf_vs_uni.lin <- (topTable(fit.main, number=nrow(fit.main), coef="inf_vs_uni.lin", adjust="fdr"))
+```
+
+En la siguiente tabla mostramos los 10 genes más expresados diferencialmente en cada comparación `inf_vs_uni.lin`.
+
+```{r, tabTopGen2, echo=FALSE}
+df_topTab_inf_vs_uni.lin <- data.frame(head(topTab_inf_vs_uni.lin,10))
+df_topTab_inf_vs_uni.lin <- cbind(PROBEID=rownames(df_topTab_inf_vs_uni.lin), df_topTab_inf_vs_uni.lin)
+kable(df_topTab_inf_vs_uni.lin, row.names = F, booktabs = T, caption = "Resultado `topTable()` para inf vs uni lin: genes que cambian su expresión entre `infeccion` y `no infeccion` con `tratamiento` `lin`.")
+```
+
+* inf_vs_uni.van: genes que cambian su expresión entre `infeccion` y `no infeccion` con `tratamiento` `van`.
+```{r, echo=FALSE}
+topTab_inf_vs_uni.van <- (topTable(fit.main, number=nrow(fit.main), coef="inf_vs_uni.van", adjust="fdr"))
+```
+
+En la siguiente tabla mostramos los 10 genes más expresados diferencialmente en cada comparación `inf_vs_uni.van`.
+
+```{r, tabTopGen3, echo=FALSE}
+df_topTab_inf_vs_uni.van <- data.frame(head(topTab_inf_vs_uni.van,10))
+df_topTab_inf_vs_uni.van <- cbind(PROBEID=rownames(df_topTab_inf_vs_uni.van), df_topTab_inf_vs_uni.van)
+kable(df_topTab_inf_vs_uni.van, row.names = F, booktabs = T, caption = "Resultado `topTable()` para inf vs uni van: genes que cambian su expresión entre `infeccion` y `no infeccion` con `tratamiento` `van`.")
+```
+
+
+```{r, echo=FALSE}
+write.csv(topTab_inf_vs_uni.unt, file= file.path(resultsDire, "data_top_inf_vs_uni_unt.csv"))
+write.csv(topTab_inf_vs_uni.lin, file= file.path(resultsDire, "data_top_inf_vs_uni_lin.csv"))
+write.csv(topTab_inf_vs_uni.van, file= file.path(resultsDire, "data_top_inf_vs_uni_van.csv"))
+```
+
+
+## Post-procesado de las listas de genes
+
+Después de realizar el análisis de cuales son los genes diferencialmente expresados para cada comparación realizaremos un post-procesado que resulte de ayuda para la interpretación de los resultados. Por ello, realizaremos:
+  
+* Comparación entre listas para determinar qué genes cambian simultáneamente o no en las diferentes comparaciones.
+* Anotación sobre la lista de genes mediante la información publicada existente en bases de datos.
+* Visualización de los genes seleccionados en las distintas comparaciones.
+* Análisis de significación biológica de las listas mediante el análisis de enriquecimiento y/o análisis `gene set analysis`.
+
+### Comparación múltiple
+
+Cuando se realizan varias comparaciones a la vez puede resultar importante ver qué genes cambian simultáneamente en más de una comparación. Para ello, utilizaremos la función `decideTests()` para realizar las comparaciones entre las listas de genes [@Sanchez20b].
+
+Realizamos la comparación múltiple con la función `decideTests()` con los siguientes parámetros: `adjust.method="fdr"`, `p.value=0.01`, `lfc=1`. Se seleccionaran los genes que cambian en una o más condiciones [@Sanchez20b]. Según [@Sanchez20b] este criterio combina a la vez la significación estadística y la significación biológica.
+
+Para cada gen y comparación el resultado del análisis será un 1 si el gen esta sobrexpresado, un 0 si no hay cambio significativo, o un -1 si está infraregulado.
+
+```{r}
+res <- decideTests(fit.main, method="separate", adjust.method="fdr", p.value=0.01, lfc=1)
+```
+
+A partir de este resultado podemos contar qué filas tienen como mínimo una celda distinta de cero y visualizar los resultados
+
+```{r}
+sum.res.rows <- apply(abs(res),1,sum)
+res.selected <- res[sum.res.rows!=0,] 
+```
+
+
+```{r, tabGenComps, echo=FALSE}
+kable(data.frame(summary(res)), row.names = F, booktabs = T, caption = "Comparación múltiple con la función `decideTests()` para cada gen y comparación el resultado del análisis.")
+```
+
+### Anotación de los genes
+
+Para ver las anotaciones disponibles que utilizaremos para asociar a los genes de nuestro estudio, descargaremos el paquete de `R` `mouse4302.db`.
+
+```{r}
+keytypes(mouse4302.db)
+columns(mouse4302.db)
+```
+
+Como una primera aproximación de exploración de la base de datos `mouse4302.db` podemos utilizar la función `aafTableAnn()` del paquete `annafy` para generar y exportar una tabla con anotaciones e hipervínculos a la base de datos para cada anotación de cada gen ya seleccionado.
+
+```{r, echo=FALSE}
+genesSelected <- rownames(res.selected)
+at <- aafTableAnn(genesSelected, "mouse4302.db")
+check_files = list.files(paste0(resultsDire),pattern="data_gen_selected_annoted_db_mouse4302.html")
+if (length(check_files) == 0){
+  saveHTML(at, file.path(resultsDire, "data_gen_selected_annoted_db_mouse4302.html"), "Annotations for selected genes")
+}
+```
+
+```{r}
+list.files(paste0(resultsDire),pattern="data_gen_selected_annoted_db_mouse4302")
+```
+
+Crearemos y usaremos la función  `annotatedTopTable()` para asociar las anotaciones de la base de datos a nuestro listado de genes, y añadir así los siguientes identificadores: `SYMBOL`, `ENTREZID`, `GENENAME` para cada comparación [@Sanchez20b]:
+  
+```{r, echo=FALSE}
+annotatedTopTable <- function(topTab, anotPackage){
+  topTab <- cbind(PROBEID=rownames(topTab), topTab)
+  myProbes <- rownames(topTab)
+  thePackage <- eval(parse(text = anotPackage))
+  geneAnots <- AnnotationDbi::select(thePackage, myProbes, c("SYMBOL", "ENTREZID", "GENENAME"))
+  annotatedTopTab<- merge(x=geneAnots, y=topTab, by.x="PROBEID", by.y="PROBEID")
+  return(annotatedTopTab)
+}
+```
+
+* inf_vs_uni.unt: genes que cambian su expresión entre `infección` y `no infección` `sin tratamiento`:
+  
+```{r}
+topAnnotated_inf_vs_uni.unt <- annotatedTopTable(topTab_inf_vs_uni.unt,anotPackage="mouse4302.db")
+```
+
+```{r, echo=FALSE}
+df_topAnnotated_inf_vs_uni.unt <- data.frame(head(topAnnotated_inf_vs_uni.unt,10)) %>%
+  mutate_if(is.numeric,round,digits = 4) %>% dplyr::select(-ENTREZID, -GENENAME)
+kable(df_topAnnotated_inf_vs_uni.unt, row.names = F, booktabs = T, caption = "Anotaciones para el resultado del análisis de expresión diferencial con `topTable()` para inf vs uni unt: genes que cambian su expresión entre `infección` y `no infección` con `tratamiento` `unt`.")
+```
+
+* inf_vs_uni.lin: genes que cambian su expresión entre `infección` y `no infección` con `tratamiento` `lin`
+
+```{r}
+topAnnotated_inf_vs_uni.lin <- annotatedTopTable(topTab_inf_vs_uni.lin,anotPackage="mouse4302.db")
+```
+
+```{r, echo=FALSE}
+df_topAnnotated_inf_vs_uni.lin <- data.frame(head(topAnnotated_inf_vs_uni.lin,10)) %>%
+  mutate_if(is.numeric,round,digits = 4) %>% dplyr::select(-ENTREZID, -GENENAME)
+kable(df_topAnnotated_inf_vs_uni.lin, row.names = F, booktabs = T, caption = "Anotaciones para el resultado del análisis de expresión diferencial con `topTable()` para inf vs uni lin: genes que cambian su expresión entre `infección` y `no infección` con `tratamiento` `lin`.")
+```
+
+* inf_vs_uni.van: genes que cambian su expresión entre `infección` y `no infección` con `tratamiento` `van`
+
+```{r}
+topAnnotated_inf_vs_uni.van <- annotatedTopTable(topTab_inf_vs_uni.van,anotPackage="mouse4302.db")
+```
+
+```{r, echo=FALSE}
+df_topAnnotated_inf_vs_uni.van <- data.frame(head(topAnnotated_inf_vs_uni.van,10)) %>%
+  mutate_if(is.numeric,round,digits = 4) %>% dplyr::select(-ENTREZID, -GENENAME)
+kable(df_topAnnotated_inf_vs_uni.van, row.names = F, booktabs = T, caption = "Anotaciones para el resultado del análisis de expresión diferencial con `topTable()` para inf vs uni van: genes que cambian su expresión entre `infección` y `no infección` con `tratamiento` `van`.")
+```
+
+Una vez hayamos asociado a nuestras listas de genes las correspondientes anotaciones para cada una de las tres comparaciones guardaremos el conjunto de datos en `resultsDire`.
+
+```{r, echo=FALSE}
+write.csv(topAnnotated_inf_vs_uni.unt, file= file.path(resultsDire, "data_top_annotated_inf_vs_uni_unt.csv"))
+write.csv(topAnnotated_inf_vs_uni.lin, file= file.path(resultsDire, "data_top_annotated_inf_vs_uni_lin.csv"))
+write.csv(topAnnotated_inf_vs_uni.van, file= file.path(resultsDire, "data_top_annotated_inf_vs_uni_van.csv"))
+```
+
+```{r}
+list.files(paste0(resultsDire),pattern="data_top_annotated")
+```
+
+### Visualización de los perfiles de expresión
+
+Podemos visualizar la tabla `res.selected` obtenida anteriormente con la función `decideTests()` mediante el diagrama de `Venn`. Este diagrama representa el número de genes que se han denominado expresados diferencialmente en cada comparación con un valor de corte establecido (`p.value=0.01`, `lfc=1`). Podemos identificar mediante la representación cuantos genes son compartidos por una o más selecciones. 
+
+```{r plotVennGenCommon, echo=FALSE, fig.cap="Diagrama de Venn con los genes expresados diferencialmente en cada comparación.", fig.width=5.0, fig.height=4.0}
+
+vennDiagram (res.selected[,1:3], cex=0.9)
+```
+
+Mediante el `volcanoplot()` obtendremos una visualización de la expresión diferencial. Este tipo de figura representa aquellos genes que aparecen en los extremos superiores. El eje X representa los cambios de expresión, es decir el efecto biológico en escala logarítmica y el eje Y representa el efecto estadístico en escala logarítmica negativa.
+
+```{r, echo=FALSE}
+geneSymbols <- AnnotationDbi::select(mouse4302.db, rownames(fit.main), c("SYMBOL"))
+```
+
+
+```{r plotVennGen1, echo=FALSE, fig.cap="Diagrama de Venn con los genes expresados diferencialmente en la primera comparación."}
+
+volcanoplot(fit.main, coef=1, highlight=10, names=geneSymbols$SYMBOL, 
+            main=paste("Differentially expressed genes", colnames(cont.matrix)[1], sep="\n"))
+abline(v=c(-1,1))
+```
+
+
+```{r plotVennGen2, echo=FALSE, fig.cap="Diagrama de Venn con los genes expresados diferencialmente en la segunda comparación."}
+
+volcanoplot(fit.main, coef=2, highlight=10, names=geneSymbols$SYMBOL,
+            main=paste("Differentially expressed genes", colnames(cont.matrix)[2], sep="\n"))
+abline(v=c(-1,1))
+
+```
+
+
+```{r plotVennGen3, echo=FALSE, fig.cap="Diagrama de Venn con los genes expresados diferencialmente en la tercera comparación."}
+
+volcanoplot(fit.main, coef=3, highlight=10, names=geneSymbols$SYMBOL, 
+            main=paste("Differentially expressed genes", colnames(cont.matrix)[3], sep="\n"))
+abline(v=c(-1,1))
+```
+
+
+
+```{r, echo=FALSE}
+probesInHeatmap <- rownames(res.selected)
+data_eset_rma_filt_sel <- exprs(data_eset_rma_filt)[rownames(exprs(data_eset_rma_filt)) %in% probesInHeatmap,]
+genes <- rownames(data_eset_rma_filt_sel)
+geneSymbols <- AnnotationDbi::select(mouse4302.db,keys = genes, columns = c("SYMBOL"))
+
+# Determine the indices for the non-NA genes
+non_na_idx <- which(is.na(geneSymbols$SYMBOL) == FALSE)
+# Return only the genes with annotations using indices
+geneSymbols <- geneSymbols[non_na_idx, ]
+# Determine the indices for the non-duplicated genes
+non_duplicates_idx <- which(duplicated(geneSymbols$SYMBOL) == FALSE)
+# Return only the non-duplicated genes using indices
+geneSymbols <- geneSymbols[non_duplicates_idx, ]
+data_eset_rma_filt_sel_anota <- exprs(data_eset_rma_filt)[rownames(exprs(data_eset_rma_filt)) %in% geneSymbols$PROBEID,]
+rownames(data_eset_rma_filt_sel_anota) <- geneSymbols$SYMBOL
+
+write.csv(data_eset_rma_filt_sel_anota, file = file.path("./results/data_normalized_filtered_selected.csv"))
+```
+
+
+
+```{r, echo=FALSE}
+my_palette <- colorRampPalette(c("blue", "red"))(n = 299)
+heatmap.2(data_eset_rma_filt_sel_anota,
+          Rowv = TRUE,
+          Colv = TRUE,
+          main = "Differentially expressed genes \n FDR < 0,1, logFC >=1",
+          scale = "row",
+          col = my_palette,
+          sepcolor = "white",
+          sepwidth = c(0.05,0.05),
+          cexRow = 0.5,
+          cexCol = 0.9,
+          key = TRUE,
+          keysize = 1.5,
+          density.info = "histogram",
+          tracecol = NULL,
+          #dendrogram = "none",
+          srtCol = 30,
+          ylab="Genes",
+          xlab="Samples"
+)
+
+```
+
+### Análisis de la significación biológica
+
+Una vez anotados los genes podremos intentar interpretar los resultados tratando determinar si las listas se encuentran enriquecidas en algunas categorías biológicas. Para ello podremos llevar a cabo un análisis de sobre-representación o un `Gene Set Enrichment Analysis`.
+
+Por último, visualizaremos de forma sencilla los resultados del análisis de significación biológica, lo que ayudará a comprender y comparar los resultados.
+
+* **Análisis de sobre-representación**
+  
+El análisis de sobre-representación toma la lista de genes expresados diferencialmente y busca categorías biológicas en las que algunos genes aparecen con frecuencias inusualmente altas. Es decir, busca genes que aparecen con más frecuencia en una categoría determinada de lo que se esperaría por casualidad [@Sanchez23].
+
+Para el análisis de enriquecimiento utilizaremos la función `enrichGO()` del paquete `clusterProfiler`. Mediante la función `get_genes_in()` obtendremos la lista de genes seleccionados (parámetro `gene`) y mediante la función `get_gen_universe()`
+obtendremos el universo de genes es decir todos los genes que se han incluido en el análisis (parámetro `universe`).
+
+```{r, echo=FALSE}
+get_genes_in <- function(topTab){
+  topGenes <- topTabAnno %>%
+    filter(adj.P.Val<0.05 & logFC>1) %>%
+    dplyr::arrange(desc(logFC)) %>%
+    distinct(ENTREZID, .keep_all = TRUE)
+  
+  genesIn_EntrezIDs <- topGenes$ENTREZID
+  return(genesIn_EntrezIDs)
+  
+}
+```
+
+```{r, echo=FALSE}
+get_gen_universe <- function(){
+  mapped_genes2GO <- mappedkeys(org.Mm.egGO)
+  mapped_genes2KEGG <- mappedkeys(org.Mm.egPATH)
+  mapped_genes <- union(mapped_genes2GO , mapped_genes2KEGG)
+  universe_EntrezIDs <- mapped_genes
+  return(universe_EntrezIDs)
+  
+}
+```
+
+Realizaremos el análisis de enriquecimiento para cada una de las comparaciones. 
+
+```{r}
+universe_EntrezIDs <- get_gen_universe()
+
+listOfTables <- list(inf_vs_uni.unt = topAnnotated_inf_vs_uni.unt, 
+                     inf_vs_uni.lin = topAnnotated_inf_vs_uni.lin, 
+                     inf_vs_uni.van = topAnnotated_inf_vs_uni.van)
+comparisonsNames <- names(listOfTables)
+```
+
+```{r}
+get_gen_enriched <- function(genesIn_EntrezIDs,universe_EntrezIDs){
+  enrich_go <- enrichGO(gene = genesIn_EntrezIDs,
+                        universe = universe_EntrezIDs,
+                        keyType = "ENTREZID",
+                        OrgDb = org.Mm.eg.db,
+                        ont = "BP",
+                        pAdjustMethod = "BH",
+                        qvalueCutoff = 0.25,
+                        readable = TRUE)
+  
+  return(enrich_go)
+}
+```
+
+* Comparación: `r comparisonsNames[1]`
+```{r, echo=FALSE}
+topTabAnno <- listOfTables[[1]]
+genesIn_EntrezIDs <- get_genes_in(topTabAnno)
+enrich_go = get_gen_enriched(genesIn_EntrezIDs,universe_EntrezIDs)
+```
+
+```{r, echo=FALSE}
+write.csv(as.data.frame(enrich_go), 
+          file =paste0("./results/","data_gen_enriched_",comparisonsNames[1],".csv"), 
+          row.names = FALSE)
+```
+
+```{r, tabGenBioSobre1,  echo=FALSE}
+df_enrich_go_inf_vs_uni.unt <- head(data.frame(enrich_go),10) %>% 
+  dplyr::select(Description, GeneRatio, BgRatio, pvalue, `p.adjust`) %>%
+  mutate_if(is.numeric,round,digits = 4)
+kable(df_enrich_go_inf_vs_uni.unt, row.names = F, booktabs = T, caption = "Análisis de sobre-representación toma la lista de genes expresados diferencialmente con `enrichGO()` para inf vs uni unt: genes que cambian su expresión entre `infección` y `no infección` con `tratamiento` `unt`.")
+```
+
+```{r, echo=FALSE}
+p1 <- (barplot(enrich_go, showCategory = 10, font.size = 10, 
+               title = paste0("Reactome Pathway Analysis for ", 
+                              comparisonsNames[1],". Barplot")))
+p2 <- (dotplot(enrich_go, showCategory=10, font.size = 10))
+```
+
+```{r plotGenBioSobre1, echo=FALSE, fig.cap="Análisis de sobre-representación toma la lista de genes expresados diferencialmente con `enrichGO()` para inf vs uni unt: genes que cambian su expresión entre `infección` y `no infección` con `tratamiento` `unt`."}
+p1
+```
+
+```{r plotGenBioSobre2, echo=FALSE, fig.cap="Análisis de sobre-representación toma la lista de genes expresados diferencialmente con `enrichGO()` para inf vs uni unt: genes que cambian su expresión entre `infección` y `no infección` con `tratamiento` `unt`."}
+p2
+```
+
+
+
+* Comparación: `r comparisonsNames[2]`
+```{r, echo=FALSE}
+topTabAnno <- listOfTables[[2]]
+genesIn_EntrezIDs <- get_genes_in(topTabAnno)
+enrich_go = get_gen_enriched(genesIn_EntrezIDs,universe_EntrezIDs)
+```
+
+```{r, echo=FALSE}
+write.csv(as.data.frame(enrich_go), 
+          file =paste0("./results/","data_gen_enriched_",comparisonsNames[2],".csv"), 
+          row.names = FALSE)
+```
+
+```{r, tabGenBioSobre2,  echo=FALSE}
+df_enrich_go_inf_vs_uni.lin <- head(data.frame(enrich_go),10) %>% 
+  dplyr::select(Description, GeneRatio, BgRatio, pvalue, `p.adjust`) %>%
+  mutate_if(is.numeric,round,digits = 4)
+kable(df_enrich_go_inf_vs_uni.lin, row.names = F, booktabs = T, caption = "Análisis de sobre-representación toma la lista de genes expresados diferencialmente con `enrichGO()` para inf vs uni lin: genes que cambian su expresión entre `infección` y `no infección` con `tratamiento` `lin`.")
+```
+
+```{r,  echo=FALSE}
+p3 <- (barplot(enrich_go, showCategory = 10, font.size = 10, 
+               title = paste0("Reactome Pathway Analysis for ", 
+                              comparisonsNames[2],". Barplot")))
+p4 <- (dotplot(enrich_go, showCategory=10, font.size = 10))
+```
+
+```{r plotGenBioSobre3, echo=FALSE, fig.cap="Análisis de sobre-representación toma la lista de genes expresados diferencialmente con `enrichGO()` para inf vs uni lin: genes que cambian su expresión entre `infección` y `no infección` con `tratamiento` `lin`."}
+p3
+```
+
+```{r plotGenBioSobre4, echo=FALSE, fig.cap="Análisis de sobre-representación toma la lista de genes expresados diferencialmente con `enrichGO()` para inf vs uni lin: genes que cambian su expresión entre `infección` y `no infección` con `tratamiento` `lin`."}
+p4
+```
+
+* Comparación: `r comparisonsNames[3]`
+```{r, echo=FALSE}
+topTabAnno <- listOfTables[[3]]
+genesIn_EntrezIDs <- get_genes_in(topTabAnno)
+enrich_go = get_gen_enriched(genesIn_EntrezIDs,universe_EntrezIDs)
+```
+
+```{r, echo=FALSE}
+write.csv(as.data.frame(enrich_go), 
+          file =paste0("./results/","data_gen_enriched_",comparisonsNames[3],".csv"), 
+          row.names = FALSE)
+```
+
+```{r, tabGenBioSobre3,  echo=FALSE}
+df_enrich_go_inf_vs_uni.van <- head(data.frame(enrich_go),10) %>% 
+  dplyr::select(Description, GeneRatio, BgRatio, pvalue, `p.adjust`) %>%
+  mutate_if(is.numeric,round,digits = 4)
+kable(df_enrich_go_inf_vs_uni.van, row.names = F, booktabs = T, caption = "Análisis de sobre-representación toma la lista de genes expresados diferencialmente con `enrichGO()` para inf vs uni van: genes que cambian su expresión entre `infección` y `no infección` con `tratamiento` `van`.")
+```
+
+```{r, echo=FALSE}
+p5 <- (barplot(enrich_go, showCategory = 10, font.size = 10, 
+               title = paste0("Reactome Pathway Analysis for ", 
+                              comparisonsNames[3],". Barplot")))
+p6 <- (dotplot(enrich_go, showCategory=10, font.size = 10))
+```
+
+```{r plotGenBioSobre5, echo=FALSE, fig.cap="Análisis de sobre-representación toma la lista de genes expresados diferencialmente con `enrichGO()` para inf vs uni van: genes que cambian su expresión entre `infección` y `no infección` con `tratamiento` `van`."}
+p5
+```
+
+```{r plotGenBioSobre6, echo=FALSE, fig.cap="Análisis de sobre-representación toma la lista de genes expresados diferencialmente con `enrichGO()` para inf vs uni van: genes que cambian su expresión entre `infección` y `no infección` con `tratamiento` `van`."}
+p6
+```
+
+
+
+
+
+* **Análisis de enriquecimiento del conjunto de genes (GSEA)**
+  
+Los análisis de expresión de conjuntos de genes funcionan con todos los genes y buscan conjuntos (categorías) de genes expresados diferencialmente. Es decir, buscan categorías que estén relacionadas con genes en las partes superior o inferior de la lista de genes [@Sanchez23].
+
+Para el análisis de conjunto de genes utilizaremos la función `gseKEGG()` del paquete `clusterProfiler`. Mediante la función `get_gen_vector()` obtenemos el parámetro `geneList`.
+
+```{r, echo=FALSE}
+get_gen_vector <- function(topTab){
+  
+  geneList <- topTab %>% 
+    dplyr::arrange(desc(logFC)) %>%
+    distinct(ENTREZID, .keep_all = TRUE) %>%
+    dplyr::arrange(desc(logFC))
+  
+  genesVector <- geneList$logFC
+  names(genesVector) <- geneList$ENTREZ
+  
+  return(genesVector)
+}
+```
+
+```{r, echo=FALSE}
+set.seed(1935)
+get_gen_set_enriched <- function(genesVector){
+  gse_kegg <- gseKEGG(geneList = genesVector,
+                      organism = "mouse",
+                      keyType = "kegg",
+                      exponent = 1,
+                      minGSSize = 10,
+                      maxGSSize = 500,
+                      pvalueCutoff = 0.05,
+                      pAdjustMethod = "BH",
+                      # nPerm = 10000, #augmentem permutacions a 10000
+                      verbose = TRUE,
+                      use_internal_data = FALSE,
+                      seed = TRUE,
+                      eps=0,
+                      by="fgsea"
+  )
+  
+  return(gse_kegg)
+}
+```
+
+* Comparación: `r comparisonsNames[1]`
+
+```{r, echo=FALSE}
+topTabAnno <- listOfTables[[1]]
+genesVector <- get_gen_vector(topTabAnno)
+gse_kegg <- get_gen_set_enriched(genesVector)
+```
+
+```{r, echo=FALSE}
+write.csv(as.data.frame(gse_kegg), 
+          file =paste0("./results/","data_gse_",comparisonsNames[1],".csv"), 
+          row.names = FALSE)
+```
+
+```{r, tabGSE1,  echo=FALSE}
+df_gse_inf_vs_uni.unt <- as.data.frame(setReadable(gse_kegg, OrgDb = org.Mm.eg.db, keyType ="ENTREZID" )) %>% 
+  dplyr::select(Description, setSize, NES, `p.adjust`) %>%
+  mutate_if(is.numeric,round,digits = 4) %>%
+  head(10)
+
+kable(df_gse_inf_vs_uni.unt, row.names = F, booktabs = T, caption = "Análisis de conjunto de genes toma la lista de genes expresados diferencialmente con `gseKEGG()` para inf vs uni unt: genes que cambian su expresión entre `infección` y `no infección` con `tratamiento` `unt`.")
+```
+
+```{r plotGSE1, echo=FALSE, fig.cap="Análisis de conjunto de genes toma la lista de genes expresados diferencialmente con `gseKEGG()` para inf vs uni unt: genes que cambian su expresión entre `infección` y `no infección` con `tratamiento` `unt`."}
+p1<- dotplot(gse_kegg, showCategory = 10, font.size = 10,
+             title =paste("Enriched Pathways\n", comparisonsNames[1] ,
+                          split=".sign") + facet_grid(.~.sign))
+p1
+```
+
+* Comparación: `r comparisonsNames[2]`
+
+```{r, echo=FALSE}
+topTabAnno <- listOfTables[[2]]
+genesVector <- get_gen_vector(topTabAnno)
+gse_kegg <- get_gen_set_enriched(genesVector)
+```
+
+```{r, echo=FALSE}
+write.csv(as.data.frame(gse_kegg), 
+          file =paste0("./results/","data_gse_",comparisonsNames[2],".csv"), 
+          row.names = FALSE)
+```
+
+```{r, tabGSE2,  echo=FALSE}
+df_gse_inf_vs_uni.lin <- as.data.frame(setReadable(gse_kegg, OrgDb = org.Mm.eg.db, keyType ="ENTREZID" )) %>% 
+  dplyr::select(Description, setSize, NES, `p.adjust`) %>%
+  mutate_if(is.numeric,round,digits = 4) %>%
+  head(10)
+
+kable(df_gse_inf_vs_uni.lin, row.names = F, booktabs = T, caption = "Análisis de conjunto de genes toma la lista de genes expresados diferencialmente con `gseKEGG()` para inf vs uni lin: genes que cambian su expresión entre `infección` y `no infección` con `tratamiento` `lin`.")
+```
+
+```{r plotGSE2, echo=FALSE, fig.cap="Análisis de conjunto de genes toma la lista de genes expresados diferencialmente con `gseKEGG()` para inf vs uni lin: genes que cambian su expresión entre `infección` y `no infección` con `tratamiento` `lin`."}
+p2 <- dotplot(gse_kegg, showCategory = 10, font.size = 10,
+              title =paste("Enriched Pathways\n", comparisonsNames[2] ,
+                           split=".sign") + facet_grid(.~.sign))
+p2
+```
+
+* Comparación: `r comparisonsNames[3]`
+
+```{r, echo=FALSE}
+topTabAnno <- listOfTables[[3]]
+genesVector <- get_gen_vector(topTabAnno)
+gse_kegg <- get_gen_set_enriched(genesVector)
+```
+
+```{r, echo=FALSE}
+write.csv(as.data.frame(gse_kegg), 
+          file =paste0("./results/","data_gse_",comparisonsNames[3],".csv"), 
+          row.names = FALSE)
+```
+
+
+```{r, tabGSE3,  echo=FALSE}
+df_gse_inf_vs_uni.van <- as.data.frame(setReadable(gse_kegg, OrgDb = org.Mm.eg.db, keyType ="ENTREZID" )) %>% 
+  dplyr::select(Description, setSize, NES, `p.adjust`) %>%
+  mutate_if(is.numeric,round,digits = 4) %>%
+  head(10)
+
+kable(df_gse_inf_vs_uni.van, row.names = F, booktabs = T, caption = "Análisis de conjunto de genes toma la lista de genes expresados diferencialmente con `gseKEGG()` para inf vs uni van: genes que cambian su expresión entre `infección` y `no infección` con `tratamiento` `van`.")
+```
+
+```{r plotGSE3, echo=FALSE, fig.cap="Análisis de conjunto de genes toma la lista de genes expresados diferencialmente con `gseKEGG()` para inf vs uni van: genes que cambian su expresión entre `infección` y `no infección` con `tratamiento` `van`."}
+p3 <- dotplot(gse_kegg, showCategory = 10, font.size = 10,
+              title =paste("Enriched Pathways\n", comparisonsNames[3] ,
+                           split=".sign") + facet_grid(.~.sign))
+p3
+```
+
+# Resumen de resultados y discusión
+
+## Resumen
+
+Inicialmente hemos preparado el entorno necesario para la elaboración de este informe y la descarga de los datos para su estudio. Una vez los datos estaban disponibles, durante el **pre-procesado** hemos preparado los datos seleccionando la muestra para el análisis. Posteriormente hemos realizado una primera exploración y hemos visto la necesidad de normalizar (función `rma()`) los datos y realizado control de calidad sobre los mismos.
+
+Sobre los datos ya normalizados hemos aplicado un filtrado y hemos dejado los datos preparados para realizar un análisis de los **genes diferencialmente expresados** para cada **comparación** a la que hemos querido dar respuesta
+
+A partir del enunciado de la PEC, hemos identificado las siguientes tres comparaciones:
+
+* Infectados vs no infectados sin tratamiento
+* Infectados vs no infectados tratados con LINEZOLID
+* Infectados vs no infectados tratados con VANCOMICINA
+
+Utilizando el paquete `limma` hemos obtenido una lista de genes diferencialmente expresados. Para ello hemos seguido los siguientes tres pasos:
+
+* Estimar el modelo: `lmFit()`.
+* Estimar los contrastes: `constrasts.fit()`. 
+* Realizar la prueba de significación: `eBayes()`.
+
+La estimación del modelo lo hemos realizado sobre los datos normalizados y filtrados (función `nsFilter()`) `data_eset_rma_filt`. Para ello hemos diseñado y utilizado la matriz de diseño. Para realizar los contrastes del modelo hemos definido la matriz de contrastes, que recoge las tres comparaciones que queríamos analizar. Para obtener el listado de genes diferencialmente expresados a partir ahí. Los resultados del análisis de expresión diferencial lo hemos extraído con la función `topTable()`.
+
+Después de realizar el análisis de cuales son los genes diferencialmente expresados para cada comparación, hemos realizado un **post-procesado** para tratar de interpretar los resultados siguiendo los siguientes pasos:
+
+* Comparar entre listas para determinar qué genes cambian simultáneamente o no en las diferentes comparaciones.
+* Anotar sobre la lista de genes mediante la información publicada existente en bases de datos.
+* Visualizar los genes seleccionados en las distintas comparaciones.
+* Analizar la significación biológica de las listas mediante el **análisis de enriquecimiento** y/o **gene set analysis**.
+
+## Resultados
+
+Durante la creación del presente documento hemos generado diferentes conjuntos de datos que hemos ido almacenando en el directorio `resultsDire`. Una vez hemos llegado a este punto del proceso, mostraremos la lista de dichos conjuntos de datos que han sido resultado del proceso:
+
+```{r, echo=FALSE}
+df_list_files_results <- data.frame(dataset = list.files(paste0(resultsDire),pattern="data"))
+kable(df_list_files_results, row.names = F, booktabs = T, caption = "Listado de los conjuntos datos que hemos generado en análisis del presente documento.")
+```
+
+```{r, echo=FALSE}
+df_list_files_results <- data.frame(dataset = list.files(paste0(resultsDire),pattern="arrayQ"))
+kable(df_list_files_results, row.names = F, booktabs = T, caption = "Los dos subdirectorios, raw y normalizado de control de calidad generados.")
+```
+
+```{r, echo=FALSE}
+df_list_files_results_arrq <- data.frame(files = list.files(paste0(resultsDire,df_list_files_results[[1]][1]), recursive = TRUE))
+
+kable(list.files(paste0(resultsDire,df_list_files_results[[1]][1]), recursive = TRUE)
+, row.names = F, booktabs = T, caption = "Los ficheros contenidos dentro que cada control de calidad generado.")
+```
+
+En las primera exploraciones, en las Figuras: \@ref(fig:plotHistRaw), \@ref(fig:plotBoxRaw) se aprecia que los valores de las muestras están fuera de los valores normales. Se pueden apreciar algunos valores atípicos mediante las visualizaciones obtenidas del la función `arrayQualityMetrics()` en las Figuras: \@ref(fig:arrQoutbox), \@ref(fig:arrQouthm), \@ref(fig:arrQoutma). 
+
+No obstante, tras normalizar los datos, en las Figuras: \@ref(fig:plotHistNorm), \@ref(fig:plotBoxNorm), podemos ver cierta normalidad y en las Figuras: \@ref(fig:arrQouthmNorm), \@ref(fig:arrQoutmaNorm), \@ref(fig:arrQoutboxNorm) que los valores atípicos se han reducido, y en general podemos decir que los datos son correctos.
+
+Tras normalizar y filtrar los datos en post-procesado, en Figura \@ref(fig:plotVennGenCommon) mediante el diagrama de Venn hemos podido detectar un cierto número de genes diferencialmente expresados. Este diagrama representa el número de genes que se han denominado expresados diferencialmente en cada comparación con un valor de corte establecido (`p.value=0.01`, `lfc=1`). Además, podemos identificar mediante la representación cuantos genes son compartidos por una o más selecciones. En las Figuras \@ref(fig:plotVennGen1), \@ref(fig:plotVennGen2), \@ref(fig:plotVennGen3) se muestras los 10 genes principales para cada condición.
+
+También hemos podido representar la comparación múltiple mediante los resultados obtenidos en la Tabla \@ref(tab:tabGenComps) que representa para condición los genes diferencialmente expresados con los valores de corte establecidos (`p.value=0.01`, `lfc=1`). Las listas completas de genes seleccionados (ordenados de mayor a menor p–valor) pueden verse en los en las Tablas: \@ref(tab:tabTopGen1), \@ref(tab:tabTopGen2), \@ref(tab:tabTopGen3)
+
+Por último, hemos realizado el análisis de significación biológica mediante el análisis de sobre-representación que se puede visualizar en las Figuras: \@ref(fig:plotGenBioSobre1), \@ref(fig:plotGenBioSobre3) y \@ref(fig:plotGenBioSobre5). Además el análisis de GSE se puede visualizar en las Figuras: \@ref(fig:plotGSE1), \@ref(fig:plotGSE2) y \@ref(fig:plotGSE3).
+
+
+## Discusión
+
+Como primer análisis de microarrays, lo que podemos destacar el es lo complicado que resulta tener conclusiones claras, sobre todo en el apartado del análisis de la significación biológica, más haya de obtener los listados para cada uno de los casos y ver que posiblemente comparten categorías biológica en las 3 condiciones. 
+
+Por otro lado, los criterios de corte (`threshold`) tanto para el filtrado de los datos, como para la selección del listado genes diferencialmente expresados, han sido totalmente arbitrarios y lo hemos establecido siguiendo el criterio de los ejemplos vistos en la asignatura. No obstante, sería interesante experimentar con estos criterios algo más para ver como varía con éste el listado de genes diferencialmente expresados.
+
+Por último, sí que podemos destacar, también en la linea de lo visto en los apuntes, que el número de muestras es limitado.
+
+
+# References
+
+\printbibliography[heading=none]
+\def\printbibliography{}
+
+# Appendix
+
+\mbox{~}
+
+
+Se pueden consultar el presente documento y así como las exportaciones realidas en la siguiete dirección git: 
+https://github.com/azenzano/Zenzano-Sarasola-Ager-PEC2.
+
+
+Carga de librerías
+```{r, eval=FALSE}
+library(dplyr)
+library(oligo)
+library(Biobase)
+library(ggplot2)
+library(ggrepel)
+library(kableExtra)
+library(arrayQualityMetrics)
+library(pvca)
+library(affyio)
+library(genefilter)
+library(mouse4302.db)
+library(limma)
+library(annaffy)
+library(annotate)
+library(tidyr)
+library(gplots)
+library(clusterProfiler)
+```
+
+Directorios y subdirectorios de los datos
+```{r, eval=FALSE}
+workingDire <-getwd()
+downloadsDire <-file.path(workingDire, "downloads/")
+dataDire <-file.path(workingDire, "data/")
+resultsDire <- file.path(workingDire,"results/")
+celfilesDire <- file.path(workingDire,"celfiles")
+```
+
+Simulamos el dataset targets basándonos en la descripción proporcionada
+```{r, eval=FALSE}
+
+allTargets <- data.frame(
+  sample = c("GSM944831", "GSM944838", "GSM944845", "GSM944852", "GSM944859",
+             "GSM944833", "GSM944840", "GSM944847", "GSM944854", "GSM944861",
+             "GSM944834", "GSM944841", "GSM944848", "GSM944855", "GSM944862",
+             "GSM944832", "GSM944839", "GSM944846", "GSM944853", "GSM944860",
+             "GSM944835", "GSM944842", "GSM944849", "GSM944856", "GSM944863",
+             "GSM944836", "GSM944843", "GSM944850", "GSM944857", "GSM944864",
+             "GSM944837", "GSM944844", "GSM944851", "GSM944858", "GSM944865"),
+  infection = c(rep("uninfected", 15), rep("S. aureus USA300", 20)),
+  time = c(rep("hour 0", 15), rep("hour 2", 5), rep("hour 24", 15)),
+  agent = c(rep("untreated", 5), rep("linezolid", 5), rep("vancomycin", 5),
+            rep("untreated", 5), rep("untreated", 5), rep("linezolid", 5), 
+            rep("vancomycin", 5)),
+  groupo = c(rep("uni_unt", 5), rep("uni_lin", 5), rep("uni_van", 5),
+             rep("inf_unt", 5), rep("inf_unt", 5), rep("inf_lin", 5), rep("inf_van", 5))
+)
+```
+
+Descarga de los datos de la base de datos de NCBI.
+```{r, eval=FALSE}
+file_path <- paste0(downloadsDire,"GSE38531_RAW.tar")
+if (file.exists(file_path)) {
+  print("The file exists!")
+} else {
+  print("The file does not exist, therefore it will be downloaded")
+  url <- "https://www.ncbi.nlm.nih.gov/geo/download/?acc=GSE38531&format=file"
+  utils::download.file(url, destfile=file_path, mode="wb") 
+}
+```
+
+Descomprimimos el fichero GSE38531_RAW.tar para obtener los ficheros `.CEL`.
+```{r, eval=FALSE}
+check_files = list.files(celfilesDire)
+if (length(check_files) == 0){
+  utils::untar(file_path, exdir = celfilesDire)
+  files <-paste("celfiles",  dir("celfiles",pattern = "*.gz"), sep="/")
+  for(filename in files){
+    R.utils::gunzip(filename, 
+                    destname = paste0(gsub("[_].*","\\2",filename),".CEL"), 
+                    overwrite=FALSE)
+  }
+}
+```
+
+Función `filter_microarray()` para generar la selección para la muestra de estudio. 
+```{r, eval=FALSE}
+filter_microarray <- function(allTargets, seed) {
+  # Esta función permitirá extraer 24 muestras distintas a cada uno con tan solo 
+  # llamarla usando como
+  
+  # Configurar la semilla aleatoria
+  set.seed(seed)
+  
+  # Filtrar las filas donde 'time' no sea 'hour 2'
+  filtered <- subset(allTargets, time != "hour 2")
+  
+  # Dividir el dataset por grupos únicos de 'infection' + 'agent'
+  filtered$group <- interaction(filtered$infection, filtered$agent)
+  
+  # Seleccionar 4 muestras al azar de cada grupo
+  selected <- do.call(rbind, lapply(split(filtered,filtered$group),function(group_data){
+    if (nrow(group_data) > 4) {
+      group_data[sample(1:nrow(group_data), 4), ]
+    } else {
+      group_data
+    }
+  }))
+  
+  # Obtener los índices originales como nombres de las filas seleccionadas
+  original_indices <- match(selected$sample, allTargets$sample)
+  
+  # Modificar los rownames usando 'sample' y los índices originales
+  rownames(selected) <- paste0(selected$sample, ".", original_indices)
+  
+  # Eliminar la columna 'group' y devolver el resultado
+  selected$group <- NULL
+  return(selected)
+}
+```
+
+Generación de selección para la muestra de estudio.
+```{r, eval=FALSE}
+result <- filter_microarray(allTargets, seed=1935) %>%
+  mutate(sample_id = sample) %>%
+  mutate(short_name = paste0(sample,"_",groupo)) %>%
+  mutate(sample=paste0(sample,".CEL"))
+
+write.table(result, file = "./celfiles/targets.txt", sep="\t", 
+            row.names=FALSE, quote=FALSE)
+```
+
+Creación del fichero `targets.txt` con las covariables del estudio.
+```{r, eval=FALSE}
+sampleInfo <- read.AnnotatedDataFrame(file.path(celfilesDire,"targets.txt"), 
+                                      header = TRUE, row.names = 1, sep="\t")
+
+fileNames <- rownames(pData(sampleInfo))
+celFiles <- file.path(celfilesDire,fileNames)
+rawData <- read.celfiles(celFiles, phenoData = sampleInfo, verbose = FALSE)
+```
+
+Función `plotPCA3()` para visualizar PCA [@Sanchez20b].
+```{r, eval=FALSE}
+plotPCA3 <- function (datos,labels,factor,title,scale,colores,size=1.5,glineas=0.25){
+  data <- prcomp(t(datos),scale=scale)
+  # plot adjustments
+  dataDf <- data.frame(data$x)
+  Group <- factor
+  loads <- round(data$sdev^2/sum(data$sdev^2)*100,1)
+  # main plot
+  p1 <- ggplot(dataDf,aes(x=PC1, y=PC2)) +
+    theme_classic() +
+    geom_hline(yintercept = 0, color = "gray70") +
+    geom_vline(xintercept = 0, color = "gray70") +
+    geom_point(aes(color = Group), alpha = 0.55, size = 3) +
+    coord_cartesian(xlim = c(min(data$x[,1])-5,max(data$x[,1])+5)) +
+    scale_fill_discrete(name = "Group")
+  # avoiding labels superposition
+  p1 + geom_text_repel(aes(y = PC2 + 0.25, label = labels),
+                       segment.size = 0.25, size = size) + 
+    labs(x = c(paste("PC1",loads[1],"%")),y=c(paste("PC2",loads[2],"%"))) +  
+    ggtitle(paste("Principal Component Analysis for: ",title,sep=" "))+ 
+    theme(plot.title = element_text(hjust = 0.5)) +
+    scale_color_manual(values=colores)
+}
+```
+
+Control de calidad con el método `arrayQualityMetrics()` del paquete `arrayQualityMetrics` específico para microarrays.
+```{r, eval=FALSE, cache=TRUE, warning=FALSE}
+if(!dir.exists(file.path(resultsDire, "arrayQuality_raw"))){
+  arrayQualityMetrics(rawData,outdir=file.path(resultsDire,"arrayQuality_raw"),force=TRUE)  
+}
+```
+
+Normalizamos las muestras mediante la función `rma()`.
+```{r, eval=FALSE}
+eset_rma <- rma(rawData)
+```
+
+Analizamos el efecto lote mediante la función `pvcaBatchAssess()` del paquete `pvca`.
+```{r, eval=FALSE}
+pData(eset_rma) <- result
+pct_threshold <- 0.6
+batch.factors <- c("time","agent")
+pvcaObj <- pvcaBatchAssess (eset_rma, batch.factors, pct_threshold)
+```
+
+Analizamos la variabilidad de los genes.
+```{r, eval=FALSE}
+sds <- apply(exprs(eset_rma), 1, sd)
+sdsO<- sort(sds)
+```
+
+Filtramos mediante la función `nsFilter()` del parque `genefilter`.
+```{r, eval=FALSE}
+data_nsFilter <- nsFilter(eset_rma, 
+                          require.entrez=TRUE,
+                          remove.dupEntrez=TRUE, 
+                          var.func=IQR,
+                          var.cutoff=0.9, 
+                          filterByQuantile=TRUE,
+                          var.filter=TRUE,
+                          feature.exclude="^AFFX"
+)
+```
+
+Guardamos los datos normalizados y los filtrados.
+```{r, eval=FALSE}
+write.csv(exprs(eset_rma), file="./results/normalized.Data.csv")
+write.csv(exprs(eset_rma_filt), file="./results/normalized.Filtered.Data.csv")
+save(eset_rma, eset_rma_filt, file="./results/normalized.Data.Rda")
+```
+
+Definimos la matriz de diseño.
+```{r, eval=FALSE}
+designMat<- model.matrix(~0+groupo, pData(data_eset_rma_filt))
+colnames(designMat) <- c("inf_lin", "inf_unt", "inf_van", 
+                         "uni_lin", "uni_unt", "uni_van")
+```
+
+Definimos la matriz de contrastes:
+```{r, eval=FALSE}
+cont.matrix <- makeContrasts (inf_vs_uni.unt = inf_unt-uni_unt,
+                              inf_vs_uni.lin = inf_lin-uni_lin,
+                              inf_vs_uni.van = inf_van-uni_van,
+                              levels=designMat)
+```
+
+Realizamos el análisis de expresión diferencial para: `inf_vs_uni.unt`, `inf_vs_uni.lin` y `inf_vs_uni.van` con la función `topTable` 
+```{r, eval=FALSE}
+topTab_inf_vs_uni.unt <- (topTable(fit.main, number=nrow(fit.main), 
+                                    coef="inf_vs_uni.unt", adjust="fdr") )
+topTab_inf_vs_uni.lin<- (topTable(fit.main, number=nrow(fit.main), 
+                                   coef="inf_vs_uni.lin", adjust="fdr"))
+topTab_inf_vs_uni.van<- (topTable(fit.main, number=nrow(fit.main), 
+                                   coef="inf_vs_uni.van", adjust="fdr"))
+```
+
+Realizamos la comparación múltiple con la función `decideTests()` con los siguientes parámetros: `adjust.method="fdr"`, `p.value=0.01`, `lfc=1`. Se seleccionaran los genes que cambian en una o más condiciones [@Sanchez20b].
+
+```{r}
+res <- decideTests(fit.main, method="separate", adjust.method="fdr", p.value=0.01, lfc=1)
+sum.res.rows <- apply(abs(res),1,sum)
+res.selected <- res[sum.res.rows!=0,] 
+```
+
+Exportamos las anotaciones asociadas a través de la base de datos `mouse4302.db` con la función `aafTableAnn()` del paquete `annafy` para nuestros genes seleccionados
+```{r, eval=FALSE}
+genesSelected <- rownames(res.selected)
+at <- aafTableAnn(genesSelected, "mouse4302.db")
+check_files = list.files(paste0(resultsDire),pattern="data_gen_selected_annoted_db_mouse4302")
+if (length(check_files) == 0){
+  saveHTML(at, file.path(resultsDire, "data_gen_selected_annoted_db_mouse4302.html"), 
+           "Annotations for selected genes")
+}
+```
+
+Crearemos la función  `annotatedTopTable()` para asociar las anotaciones de la base de datos a nuestro listado de genes, y añadir así los siguientes identificadores [@GonzaloSanz2020]: `SYMBOL`, `ENTREZID`, `GENENAME`.
+```{r, eval=FALSE}
+annotatedTopTable <- function(topTab, anotPackage){
+  topTab <- cbind(PROBEID=rownames(topTab), topTab)
+  myProbes <- rownames(topTab)
+  thePackage <- eval(parse(text = anotPackage))
+  geneAnots <- AnnotationDbi::select(thePackage,myProbes,c("SYMBOL","ENTREZID","GENENAME"))
+  annotatedTopTab<- merge(x=geneAnots, y=topTab, by.x="PROBEID", by.y="PROBEID")
+  return(annotatedTopTab)
+}
+```
+
+
+Creamos el conjunto de datos para visualizarlo con un mapa de calor.
+```{r, eval=FALSE}
+probesInHeatmap <- rownames(res.selected)
+data_eset_rma_filt_sel <- exprs(
+  data_eset_rma_filt)[rownames(exprs(data_eset_rma_filt)) %in% probesInHeatmap,]
+genes <- rownames(data_eset_rma_filt_sel)
+geneSymbols <- AnnotationDbi::select(mouse4302.db,keys = genes, columns = c("SYMBOL"))
+
+# Determine the indices for the non-NA genes
+non_na_idx <- which(is.na(geneSymbols$SYMBOL) == FALSE)
+# Return only the genes with annotations using indices
+geneSymbols <- geneSymbols[non_na_idx, ]
+# Determine the indices for the non-duplicated genes
+non_duplicates_idx <- which(duplicated(geneSymbols$SYMBOL) == FALSE)
+# Return only the non-duplicated genes using indices
+geneSymbols <- geneSymbols[non_duplicates_idx, ]
+data_eset_rma_filt_sel_anota <- exprs(
+  data_eset_rma_filt)[rownames(exprs(data_eset_rma_filt)) %in% geneSymbols$PROBEID,]
+rownames(data_eset_rma_filt_sel_anota) <- geneSymbols$SYMBOL
+
+write.csv(data_eset_rma_filt_sel_anota, 
+          file = file.path("./results/data_normalized_filtered_selected.csv"))
+```
+
+
+Para el análisis de enriquecimiento utilizaremos la función `enrichGO()` del paquete `clusterProfiler`. Mediante la función `get_genes_in()` obtenemos el parámetro `gene` y mediante la función `get_gen_universe()` el parámetro `universe`.
+
+
+Función para obtener los genes del estudio.
+```{r, eval=FALSE}
+get_genes_in <- function(topTab){
+  topGenes <- topTabAnno %>%
+    filter(adj.P.Val<0.05 & logFC>1) %>%
+    dplyr::arrange(desc(logFC)) %>%
+    distinct(ENTREZID, .keep_all = TRUE)
+  
+  genesIn_EntrezIDs <- topGenes$ENTREZID
+  return(genesIn_EntrezIDs)
+  
+}
+```
+
+Función para obtener los genes del universo mediante las base de datos `org.Mm.egGO` y `org.Mm.egPATH`.
+```{r, eval=FALSE}
+get_gen_universe <- function(){
+  mapped_genes2GO <- mappedkeys(org.Mm.egGO)
+  mapped_genes2KEGG <- mappedkeys(org.Mm.egPATH)
+  mapped_genes <- union(mapped_genes2GO , mapped_genes2KEGG)
+  universe_EntrezIDs <- mapped_genes
+  return(universe_EntrezIDs)
+  
+}
+```
+
+Análisis de sobre-representación
+```{r, eval=FALSE}
+for (i in 1:length(listOfTables)){
+  
+  topTabAnno <- listOfTables[[i]]
+  genesIn_EntrezIDs <- get_genes_in(topTabAnno)
+  enrich_go = get_gen_enriched(genesIn_EntrezIDs,universe_EntrezIDs)
+  
+  cat("\n* Comparación: ", comparisonsNames[i],"\n")
+  
+  write.csv(as.data.frame(enrich_go), 
+            file =paste0("./results/","data_gen_enriched_",comparisonsNames[i],".csv"), 
+            row.names = FALSE)
+  
+  print(barplot(enrich_go, showCategory = 15, font.size = 8, 
+                title = paste0("Reactome Pathway Analysis for ", 
+                               comparisonsNames[i],". Barplot")))
+  
+  print(dotplot(enrich_go, showCategory=9))
+}
+
+```
+
+Función para realizar y obtener en análisis enriquecido con la función `enrichGO()` del paquete `clusterProfiler`. 
+```{r, eval=FALSE}
+get_gen_enriched <- function(genesIn_EntrezIDs,universe_EntrezIDs){
+  enrich_go <- enrichGO(gene = genesIn_EntrezIDs,
+                        universe = universe_EntrezIDs,
+                        keyType = "ENTREZID",
+                        OrgDb = org.Mm.eg.db,
+                        ont = "BP",
+                        pAdjustMethod = "BH",
+                        qvalueCutoff = 0.25,
+                        readable = TRUE)
+  
+  return(enrich_go)
+}
+```
+
+Función para obtener los genes del estudio.
+```{r, eval=FALSE}
+get_gen_vector <- function(topTab){
+  geneList <- topAnnotated_inf_vs_uni.unt %>% 
+    dplyr::arrange(desc(logFC)) %>%
+    distinct(ENTREZID, .keep_all = TRUE) %>%
+    dplyr::arrange(desc(logFC))
+  
+  genesVector <- geneList$logFC
+  names(genesVector) <- geneList$ENTREZ
+  
+  return(genesVector)
+}
+```
+
+Función para realizar y obtener en análisis `GSE` con la función `gseKEGG()` del paquete `clusterProfiler`. 
+```{r, eval=FALSE}
+set.seed(1935)
+get_gen_set_enriched <- function(genesVector){
+  gse_kegg <- gseKEGG(geneList = genesVector,
+                      organism = "mouse",
+                      keyType = "kegg",
+                      exponent = 1,
+                      minGSSize = 10,
+                      maxGSSize = 500,
+                      pvalueCutoff = 0.05,
+                      pAdjustMethod = "BH",
+                      # nPerm = 10000, #augmentem permutacions a 10000
+                      verbose = TRUE,
+                      use_internal_data = FALSE,
+                      seed = TRUE,
+                      eps=0,
+                      by="fgsea"
+  )
+  
+  return(gse_kegg)
+  
+}
+```
+
+Análisis de `GSE`.
+```{r, eval=FALSE}
+for (i in 1:length(listOfTables)){
+  topTabAnno <- listOfTables[[i]]
+  
+  genesVector <- get_gen_vector(topTabAnno)
+  gse_kegg <- get_gen_set_enriched(genesVector)
+  
+  cat("\n* Comparison: ", comparisonsNames[i],"\n")
+  
+  df_gsea_result <- as.data.frame(setReadable(gse_kegg, OrgDb = org.Mm.eg.db, keyType ="ENTREZID" ))
+  print(kable(df_gsea_result[,c("Description","setSize","NES","p.adjust")]))
+  
+  
+  print(head(gse_kegg))
+  
+  write.csv(as.data.frame(gse_kegg), 
+            file =paste0("./results/","data_gse_",comparisonsNames[i],".csv"), 
+            row.names = FALSE)
+  
+  p<- dotplot(gse_kegg, showCategory = 10, font.size = 10,
+              title =paste("Enriched Pathways\n", comparisonsNames[1] ,
+                           split=".sign") + facet_grid(.~.sign))
+  print(p)
+}
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
